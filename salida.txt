@@ -1,0 +1,642 @@
+color.rs:
+use std::fmt;
+
+#[derive(Debug, Clone, Copy)]
+pub struct Color {
+  r: u8,
+  g: u8,
+  b: u8,
+}
+
+impl Color {
+  // Constructor to initialize the color using r, g, b values as u8
+  pub fn new(r: u8, g: u8, b: u8) -> Self {
+    Color { r, g, b }
+  }
+
+  // default color
+  pub fn black() -> Self {
+    Color { r: 0, g: 0, b: 0 }
+  }
+
+  // New constructor to initialize the color using r, g, b values as f32 (0.0 to 1.0)
+  pub fn from_float(r: f32, g: f32, b: f32) -> Self {
+    Color {
+      r: (r.clamp(0.0, 1.0) * 255.0) as u8,
+      g: (g.clamp(0.0, 1.0) * 255.0) as u8,
+      b: (b.clamp(0.0, 1.0) * 255.0) as u8,
+    }
+  }
+
+  // Function to create a color from a hex value
+  pub fn from_hex(hex: u32) -> Self {
+    let r = ((hex >> 16) & 0xFF) as u8;
+    let g = ((hex >> 8) & 0xFF) as u8;
+    let b = (hex & 0xFF) as u8;
+    Color { r, g, b }
+  }
+
+  // Function to return the color as a hex value
+  pub fn to_hex(&self) -> u32 {
+    ((self.r as u32) << 16) | ((self.g as u32) << 8) | (self.b as u32)
+  }
+}
+
+// Implement addition for Color
+use std::ops::Add;
+
+impl Add for Color {
+  type Output = Color;
+
+  fn add(self, other: Color) -> Color {
+    Color {
+      r: self.r.saturating_add(other.r),
+      g: self.g.saturating_add(other.g),
+      b: self.b.saturating_add(other.b),
+    }
+  }
+}
+
+// Implement multiplication by a constant for Color
+use std::ops::Mul;
+
+impl Mul<f32> for Color {
+  type Output = Color;
+
+  fn mul(self, scalar: f32) -> Color {
+    Color {
+      r: (self.r as f32 * scalar).clamp(0.0, 255.0) as u8,
+      g: (self.g as f32 * scalar).clamp(0.0, 255.0) as u8,
+      b: (self.b as f32 * scalar).clamp(0.0, 255.0) as u8,
+    }
+  }
+}
+
+// Implement display formatting for Color
+impl fmt::Display for Color {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    write!(f, "Color(r: {}, g: {}, b: {})", self.r, self.g, self.b)
+  }
+}
+
+fragment.rs:
+use nalgebra_glm::Vec2;
+use crate::color::Color;
+
+pub struct Fragment {
+    pub position: Vec2,
+    pub color: Color,
+    pub depth: f32,
+}
+
+impl Fragment {
+    pub fn new(x: f32, y: f32, color: Color, depth: f32) -> Self {
+        Fragment {
+            position: Vec2::new(x, y),
+            color,
+            depth,
+        }
+    }
+}
+
+framebuffer.rs:
+// framebuffer.rs
+
+pub struct Framebuffer {
+    pub width: usize,
+    pub height: usize,
+    pub buffer: Vec<u32>,
+    pub zbuffer: Vec<f32>,
+    background_color: u32,
+    current_color: u32,
+}
+
+impl Framebuffer {
+    pub fn new(width: usize, height: usize) -> Self {
+        Framebuffer {
+            width,
+            height,
+            buffer: vec![0; width * height],
+            zbuffer: vec![f32::INFINITY; width * height],
+            background_color: 0x000000,
+            current_color: 0xFFFFFF,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        for pixel in self.buffer.iter_mut() {
+            *pixel = self.background_color;
+        }
+        for depth in self.zbuffer.iter_mut() {
+            *depth = f32::INFINITY;
+        }
+    }
+
+    pub fn point(&mut self, x: usize, y: usize, depth: f32) {
+        if x < self.width && y < self.height {
+            let index = y * self.width + x;
+            if self.zbuffer[index] > depth {
+                self.buffer[index] = self.current_color;
+                self.zbuffer[index] = depth;
+            }
+        }
+    }
+
+    pub fn set_background_color(&mut self, color: u32) {
+        self.background_color = color;
+    }
+
+    pub fn set_current_color(&mut self, color: u32) {
+        self.current_color = color;
+    }
+}
+
+line.rs:
+use crate::fragment::Fragment;
+use crate::vertex::Vertex;
+use crate::color::Color;
+
+pub fn line(a: &Vertex, b: &Vertex) -> Vec<Fragment> {
+    let mut fragments = Vec::new();
+
+    let start = a.transformed_position;
+    let end = b.transformed_position;
+
+    let mut x0 = start.x as i32;
+    let mut y0 = start.y as i32;
+    let x1 = end.x as i32;
+    let y1 = end.y as i32;
+
+    let dx = (x1 - x0).abs();
+    let dy = (y1 - y0).abs();
+
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let sy = if y0 < y1 { 1 } else { -1 };
+
+    let mut err = if dx > dy { dx / 2 } else { -dy / 2 };
+
+    loop {
+        let z = start.z + (end.z - start.z) * (x0 - start.x as i32) as f32 / (end.x - start.x) as f32;
+        fragments.push(Fragment::new(x0 as f32, y0 as f32, Color::new(255, 255, 255), z));
+
+        if x0 == x1 && y0 == y1 { break; }
+
+        let e2 = err;
+        if e2 > -dx {
+            err -= dy;
+            x0 += sx;
+        }
+        if e2 < dy {
+            err += dx;
+            y0 += sy;
+        }
+    }
+
+    fragments
+}
+
+main.rs:
+use nalgebra_glm::{Vec3, Mat4};
+use minifb::{Key, Window, WindowOptions};
+use std::time::Duration;
+use std::f32::consts::PI;
+
+mod framebuffer;
+mod triangle;
+mod line;
+mod vertex;
+mod obj;
+mod color;
+mod fragment;
+mod shaders;
+
+use framebuffer::Framebuffer;
+use vertex::Vertex;
+use obj::Obj;
+use triangle::triangle;
+use shaders::vertex_shader;
+
+
+pub struct Uniforms {
+    model_matrix: Mat4,
+}
+
+fn create_model_matrix(translation: Vec3, scale: f32, rotation: Vec3) -> Mat4 {
+    let (sin_x, cos_x) = rotation.x.sin_cos();
+    let (sin_y, cos_y) = rotation.y.sin_cos();
+    let (sin_z, cos_z) = rotation.z.sin_cos();
+
+    let rotation_matrix_x = Mat4::new(
+        1.0,  0.0,    0.0,   0.0,
+        0.0,  cos_x, -sin_x, 0.0,
+        0.0,  sin_x,  cos_x, 0.0,
+        0.0,  0.0,    0.0,   1.0,
+    );
+
+    let rotation_matrix_y = Mat4::new(
+        cos_y,  0.0,  sin_y, 0.0,
+        0.0,    1.0,  0.0,   0.0,
+        -sin_y, 0.0,  cos_y, 0.0,
+        0.0,    0.0,  0.0,   1.0,
+    );
+
+    let rotation_matrix_z = Mat4::new(
+        cos_z, -sin_z, 0.0, 0.0,
+        sin_z,  cos_z, 0.0, 0.0,
+        0.0,    0.0,  1.0, 0.0,
+        0.0,    0.0,  0.0, 1.0,
+    );
+
+    let rotation_matrix = rotation_matrix_z * rotation_matrix_y * rotation_matrix_x;
+
+    let transform_matrix = Mat4::new(
+        scale, 0.0,   0.0,   translation.x,
+        0.0,   scale, 0.0,   translation.y,
+        0.0,   0.0,   scale, translation.z,
+        0.0,   0.0,   0.0,   1.0,
+    );
+
+    transform_matrix * rotation_matrix
+}
+
+fn render(framebuffer: &mut Framebuffer, uniforms: &Uniforms, vertex_array: &[Vertex]) {
+    // Vertex Shader Stage
+    let mut transformed_vertices = Vec::with_capacity(vertex_array.len());
+    for vertex in vertex_array {
+        let transformed = vertex_shader(vertex, uniforms);
+        transformed_vertices.push(transformed);
+    }
+
+    // Primitive Assembly Stage
+    let mut triangles = Vec::new();
+    for i in (0..transformed_vertices.len()).step_by(3) {
+        if i + 2 < transformed_vertices.len() {
+            triangles.push([
+                transformed_vertices[i].clone(),
+                transformed_vertices[i + 1].clone(),
+                transformed_vertices[i + 2].clone(),
+            ]);
+        }
+    }
+
+    // Rasterization Stage
+    let mut fragments = Vec::new();
+    for tri in &triangles {
+        fragments.extend(triangle(&tri[0], &tri[1], &tri[2]));
+    }
+
+    // Fragment Processing Stage
+    for fragment in fragments {
+        let x = fragment.position.x as usize;
+        let y = fragment.position.y as usize;
+        if x < framebuffer.width && y < framebuffer.height {
+            let color = fragment.color.to_hex();
+            framebuffer.set_current_color(color);
+            framebuffer.point(x, y, fragment.depth);
+        }
+    }
+}
+
+fn main() {
+    let window_width = 800;
+    let window_height = 600;
+    let framebuffer_width = 800;
+    let framebuffer_height = 600;
+    let frame_delay = Duration::from_millis(16);
+
+    let mut framebuffer = Framebuffer::new(framebuffer_width, framebuffer_height);
+    let mut window = Window::new(
+        "Rust Graphics - Renderer Example",
+        window_width,
+        window_height,
+        WindowOptions::default(),
+    )
+    .unwrap();
+
+    window.set_position(500, 500);
+    window.update();
+
+    framebuffer.set_background_color(0x333355);
+
+    let mut translation = Vec3::new(300.0, 200.0, 0.0);
+    let mut rotation = Vec3::new(0.0, 0.0, 0.0);
+    let mut scale = 100.0f32;
+
+    let obj = Obj::load("assets/models/Pelican.obj").expect("Failed to load obj");
+    let vertex_arrays = obj.get_vertex_array(); 
+
+    while window.is_open() {
+        if window.is_key_down(Key::Escape) {
+            break;
+        }
+
+        handle_input(&window, &mut translation, &mut rotation, &mut scale);
+
+        framebuffer.clear();
+
+        let model_matrix = create_model_matrix(translation, scale, rotation);
+        let uniforms = Uniforms { model_matrix };
+
+        framebuffer.set_current_color(0xFFDDDD);
+        render(&mut framebuffer, &uniforms, &vertex_arrays);
+
+        window
+            .update_with_buffer(&framebuffer.buffer, framebuffer_width, framebuffer_height)
+            .unwrap();
+
+        std::thread::sleep(frame_delay);
+    }
+}
+
+fn handle_input(window: &Window, translation: &mut Vec3, rotation: &mut Vec3, scale: &mut f32) {
+    if window.is_key_down(Key::Right) {
+        translation.x += 10.0;
+    }
+    if window.is_key_down(Key::Left) {
+        translation.x -= 10.0;
+    }
+    if window.is_key_down(Key::Up) {
+        translation.y -= 10.0;
+    }
+    if window.is_key_down(Key::Down) {
+        translation.y += 10.0;
+    }
+    if window.is_key_down(Key::S) {
+        *scale += 2.0;
+    }
+    if window.is_key_down(Key::A) {
+        *scale -= 2.0;
+    }
+    if window.is_key_down(Key::Q) {
+        rotation.x -= PI / 10.0;
+    }
+    if window.is_key_down(Key::W) {
+        rotation.x += PI / 10.0;
+    }
+    if window.is_key_down(Key::E) {
+        rotation.y -= PI / 10.0;
+    }
+    if window.is_key_down(Key::R) {
+        rotation.y += PI / 10.0;
+    }
+    if window.is_key_down(Key::T) {
+        rotation.z -= PI / 10.0;
+    }
+    if window.is_key_down(Key::Y) {
+        rotation.z += PI / 10.0;
+    }
+}
+
+obj.rs:
+use tobj;
+use nalgebra_glm::{Vec2, Vec3};
+use crate::vertex::Vertex;
+
+pub struct Obj {
+    meshes: Vec<Mesh>,
+}
+
+struct Mesh {
+    vertices: Vec<Vec3>,
+    normals: Vec<Vec3>,
+    texcoords: Vec<Vec2>,
+    indices: Vec<u32>,
+}
+
+impl Obj {
+    pub fn load(filename: &str) -> Result<Self, tobj::LoadError> {
+        let (models, _) = tobj::load_obj(filename, &tobj::LoadOptions {
+            single_index: true,
+            triangulate: true,
+            ..Default::default()
+        })?;
+
+        let meshes = models.into_iter().map(|model| {
+            let mesh = model.mesh;
+            Mesh {
+                vertices: mesh.positions.chunks(3)
+                    .map(|v| Vec3::new(v[0], -v[1], -v[2]))
+                    .collect(),
+                normals: mesh.normals.chunks(3)
+                    .map(|n| Vec3::new(n[0], -n[1], -n[2]))
+                    .collect(),
+                texcoords: mesh.texcoords.chunks(2)
+                    .map(|t| Vec2::new(t[0], 1.0 - t[1]))
+                    .collect(),
+                indices: mesh.indices,
+            }
+        }).collect();
+
+        Ok(Obj { meshes })
+    }
+
+    pub fn get_vertex_array(&self) -> Vec<Vertex> {
+        let mut vertices = Vec::new();
+
+        for mesh in &self.meshes {
+            for &index in &mesh.indices {
+                let position = mesh.vertices[index as usize];
+                let normal = mesh.normals.get(index as usize)
+                    .cloned()
+                    .unwrap_or(Vec3::new(0.0, 1.0, 0.0));
+                let tex_coords = mesh.texcoords.get(index as usize)
+                    .cloned()
+                    .unwrap_or(Vec2::new(0.0, 0.0));
+
+                vertices.push(Vertex::new(position, normal, tex_coords));
+            }
+        }
+
+        vertices
+    }
+}
+
+shaders.rs:
+use nalgebra_glm::{Vec3, Vec4, Mat3};
+use crate::vertex::Vertex;
+use crate::Uniforms;
+
+pub fn vertex_shader(vertex: &Vertex, uniforms: &Uniforms) -> Vertex {
+  // Transform position
+  let position = Vec4::new(
+    vertex.position.x,
+    vertex.position.y,
+    vertex.position.z,
+    1.0
+  );
+  let transformed = uniforms.model_matrix * position;
+
+  // Perform perspective division
+  let w = transformed.w;
+  let transformed_position = Vec3::new(
+    transformed.x / w,
+    transformed.y / w,
+    transformed.z / w
+  );
+
+  // Transform normal
+
+  let model_mat3 = Mat3::new(
+    uniforms.model_matrix[0], uniforms.model_matrix[1], uniforms.model_matrix[2],
+    uniforms.model_matrix[4], uniforms.model_matrix[5], uniforms.model_matrix[6],
+    uniforms.model_matrix[8], uniforms.model_matrix[9], uniforms.model_matrix[10]
+  );
+  let normal_matrix = model_mat3.transpose().try_inverse().unwrap_or(Mat3::identity());
+
+  let transformed_normal = normal_matrix * vertex.normal;
+
+  // Create a new Vertex with transformed attributes
+  Vertex {
+    position: vertex.position,
+    normal: vertex.normal,
+    tex_coords: vertex.tex_coords,
+    color: vertex.color,
+    transformed_position,
+    transformed_normal,
+  }
+}
+
+
+triangle.rs:
+use nalgebra_glm::{Vec3, dot};
+use crate::fragment::Fragment;
+use crate::vertex::Vertex;
+use crate::line::line;
+use crate::color::Color;
+
+pub fn _triangle(v1: &Vertex, v2: &Vertex, v3: &Vertex) -> Vec<Fragment> {
+  let mut fragments = Vec::new();
+
+  // Draw the three sides of the triangle
+  fragments.extend(line(v1, v2));
+  fragments.extend(line(v2, v3));
+  fragments.extend(line(v3, v1));
+
+  fragments
+}
+
+pub fn triangle(v1: &Vertex, v2: &Vertex, v3: &Vertex) -> Vec<Fragment> {
+  let mut fragments = Vec::new();
+  let (a, b, c) = (v1.transformed_position, v2.transformed_position, v3.transformed_position);
+
+  let (min_x, min_y, max_x, max_y) = calculate_bounding_box(&a, &b, &c);
+
+  let light_dir = Vec3::new(0.0, 0.0, -1.0);
+
+  let triangle_area = edge_function(&a, &b, &c);
+
+  // Iterate over each pixel in the bounding box
+  for y in min_y..=max_y {
+    for x in min_x..=max_x {
+      let point = Vec3::new(x as f32 + 0.5, y as f32 + 0.5, 0.0);
+
+      // Calculate barycentric coordinates
+      let (w1, w2, w3) = barycentric_coordinates(&point, &a, &b, &c, triangle_area);
+
+      // Check if the point is inside the triangle
+      if w1 >= 0.0 && w1 <= 1.0 && 
+         w2 >= 0.0 && w2 <= 1.0 &&
+         w3 >= 0.0 && w3 <= 1.0 {
+        // Interpolate normal
+        // let normal = v1.transformed_normal * w1 + v2.transformed_normal * w2 + v3.transformed_normal * w3;
+        let normal = v1.transformed_normal;
+        let normal = normal.normalize();
+
+        // Calculate lighting intensity
+        let intensity = dot(&normal, &light_dir).max(0.0);
+
+        // Create a gray color and apply lighting
+        let base_color = Color::new(100, 100, 100); // Medium gray
+        let lit_color = base_color * intensity;
+
+        // Interpolate depth
+        // let depth = a.z * w1 + b.z * w2 + c.z * w3;
+        let depth = a.z;
+
+        fragments.push(Fragment::new(x as f32, y as f32, lit_color, depth));
+      }
+    }
+  }
+
+  fragments
+}
+
+fn calculate_bounding_box(v1: &Vec3, v2: &Vec3, v3: &Vec3) -> (i32, i32, i32, i32) {
+    let min_x = v1.x.min(v2.x).min(v3.x).floor() as i32;
+    let min_y = v1.y.min(v2.y).min(v3.y).floor() as i32;
+    let max_x = v1.x.max(v2.x).max(v3.x).ceil() as i32;
+    let max_y = v1.y.max(v2.y).max(v3.y).ceil() as i32;
+
+    (min_x, min_y, max_x, max_y)
+}
+
+fn barycentric_coordinates(p: &Vec3, a: &Vec3, b: &Vec3, c: &Vec3, area: f32) -> (f32, f32, f32) {
+    let w1 = edge_function(b, c, p) / area;
+    let w2 = edge_function(c, a, p) / area;
+    let w3 = edge_function(a, b, p) / area;
+
+    (w1, w2, w3)
+}
+
+fn edge_function(a: &Vec3, b: &Vec3, c: &Vec3) -> f32 {
+    (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)
+}
+
+
+
+vertex.rs:
+use nalgebra_glm::{Vec2, Vec3};
+use crate::color::Color;
+
+#[derive(Clone, Debug)]
+pub struct Vertex {
+  pub position: Vec3,
+  pub normal: Vec3,
+  pub tex_coords: Vec2,
+  pub color: Color,
+  pub transformed_position: Vec3,
+  pub transformed_normal: Vec3,
+}
+
+impl Vertex {
+  pub fn new(position: Vec3, normal: Vec3, tex_coords: Vec2) -> Self {
+    Vertex {
+      position,
+      normal,
+      tex_coords,
+      color: Color::black(),
+      transformed_position: position,
+      transformed_normal: normal,
+    }
+  }
+
+  pub fn new_with_color(position: Vec3, color: Color) -> Self {
+    Vertex {
+      position,
+      normal: Vec3::new(0.0, 0.0, 0.0),
+      tex_coords: Vec2::new(0.0, 0.0),
+      color,
+      transformed_position: Vec3::new(0.0, 0.0, 0.0),
+      transformed_normal: Vec3::new(0.0, 0.0, 0.0),
+    }
+  }
+
+  pub fn set_transformed(&mut self, position: Vec3, normal: Vec3) {
+    self.transformed_position = position;
+    self.transformed_normal = normal;
+  }
+}
+
+impl Default for Vertex {
+  fn default() -> Self {
+    Vertex {
+      position: Vec3::new(0.0, 0.0, 0.0),
+      normal: Vec3::new(0.0, 1.0, 0.0),
+      tex_coords: Vec2::new(0.0, 0.0),
+      color: Color::black(),
+      transformed_position: Vec3::new(0.0, 0.0, 0.0),
+      transformed_normal: Vec3::new(0.0, 1.0, 0.0),
+    }
+  }
+}
+
