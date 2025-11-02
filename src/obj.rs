@@ -78,4 +78,17 @@ impl Obj {
 
         vertices
     }
+
+    pub fn bounds(&self) -> (Vec3, Vec3) {
+        let mut min_v = Vec3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+        let mut max_v = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+
+        for mesh in &self.meshes {
+            for p in &mesh.vertices {
+                min_v.x = min_v.x.min(p.x);  min_v.y = min_v.y.min(p.y);  min_v.z = min_v.z.min(p.z);
+                max_v.x = max_v.x.max(p.x);  max_v.y = max_v.y.max(p.y);  max_v.z = max_v.z.max(p.z);
+            }
+        }
+        (min_v, max_v)
+    }
 }

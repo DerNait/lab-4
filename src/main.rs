@@ -110,7 +110,7 @@ fn main() {
 
     let mut framebuffer = Framebuffer::new(framebuffer_width, framebuffer_height);
     let mut window = Window::new(
-        "Rust Graphics - Renderer Example",
+        "UNSC Pelican",
         window_width,
         window_height,
         WindowOptions::default(),
@@ -122,11 +122,28 @@ fn main() {
 
     framebuffer.set_background_color(0x333355);
 
-    let mut translation = Vec3::new(300.0, 200.0, 0.0);
-    let mut rotation = Vec3::new(0.0, 0.0, 0.0);
-    let mut scale = 100.0f32;
-
     let obj = Obj::load("assets/models/Pelican.obj").expect("Failed to load obj");
+
+    let (min_v, max_v) = obj.bounds();
+    let size = max_v - min_v;
+    let center = (min_v + max_v) * 0.5;
+
+    // escala inicial para que quepa aprox. al 80% de la pantalla
+    let target_w = framebuffer_width as f32 * 0.8;
+    let target_h = framebuffer_height as f32 * 0.8;
+    let sx = if size.x.abs() < 1e-6 { 1.0 } else { target_w / size.x.abs() };
+    let sy = if size.y.abs() < 1e-6 { 1.0 } else { target_h / size.y.abs() };
+    let mut scale = sx.min(sy);
+
+    // centrado en pantalla compensando el centro del modelo
+    let mut translation = Vec3::new(
+        (framebuffer_width as f32) * 0.5 - center.x * scale,
+        (framebuffer_height as f32) * 0.5 - center.y * scale,
+        -center.z * scale // opcional, por simetría
+    );
+
+    let mut rotation = Vec3::new(0.0, 0.0, 0.0);
+
 
     while window.is_open() {
         if window.is_key_down(Key::Escape) {
