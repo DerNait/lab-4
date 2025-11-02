@@ -1,4 +1,4 @@
-# Software Renderer – Proyecto 1
+# Lab 4: Carga de modelos
 
 - Carga de modelo OBJ (Pelican) con rasterizador por triángulos.
 - Recorrido manual de **caras** usando **índices** para armar cada triángulo.
