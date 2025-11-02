@@ -18,7 +18,6 @@ use obj::Obj;
 use triangle::triangle;
 use shaders::vertex_shader;
 
-
 pub struct Uniforms {
     model_matrix: Mat4,
 }
@@ -61,39 +60,42 @@ fn create_model_matrix(translation: Vec3, scale: f32, rotation: Vec3) -> Mat4 {
     transform_matrix * rotation_matrix
 }
 
-fn render(framebuffer: &mut Framebuffer, uniforms: &Uniforms, vertex_array: &[Vertex]) {
-    // Vertex Shader Stage
-    let mut transformed_vertices = Vec::with_capacity(vertex_array.len());
-    for vertex in vertex_array {
-        let transformed = vertex_shader(vertex, uniforms);
-        transformed_vertices.push(transformed);
-    }
+fn render(framebuffer: &mut Framebuffer, uniforms: &Uniforms, obj: &Obj) {
+    // Obtenemos vistas a los buffers (posición, normal, uv)
+    let (positions, normals, uvs) = obj.mesh_buffers();
 
-    // Primitive Assembly Stage
-    let mut triangles = Vec::new();
-    for i in (0..transformed_vertices.len()).step_by(3) {
-        if i + 2 < transformed_vertices.len() {
-            triangles.push([
-                transformed_vertices[i].clone(),
-                transformed_vertices[i + 1].clone(),
-                transformed_vertices[i + 2].clone(),
-            ]);
-        }
-    }
+    // Rasterizar todos los triángulos recorriendo índices (caras)
+    let mut all_fragments = Vec::new();
 
-    // Rasterization Stage
-    let mut fragments = Vec::new();
-    for tri in &triangles {
-        fragments.extend(triangle(&tri[0], &tri[1], &tri[2]));
-    }
+    obj.for_each_face(|i0, i1, i2| {
+        // Construye los 3 vertices a partir de los buffers e índices
+        let p0 = positions[i0];
+        let p1 = positions[i1];
+        let p2 = positions[i2];
 
-    // Fragment Processing Stage
-    for fragment in fragments {
+        let n0 = normals.get(i0).cloned().unwrap_or(nalgebra_glm::Vec3::new(0.0, 1.0, 0.0));
+        let n1 = normals.get(i1).cloned().unwrap_or(nalgebra_glm::Vec3::new(0.0, 1.0, 0.0));
+        let n2 = normals.get(i2).cloned().unwrap_or(nalgebra_glm::Vec3::new(0.0, 1.0, 0.0));
+
+        let t0 = uvs.get(i0).cloned().unwrap_or(nalgebra_glm::Vec2::new(0.0, 0.0));
+        let t1 = uvs.get(i1).cloned().unwrap_or(nalgebra_glm::Vec2::new(0.0, 0.0));
+        let t2 = uvs.get(i2).cloned().unwrap_or(nalgebra_glm::Vec2::new(0.0, 0.0));
+
+        // Pasa por el vertex shader (aplica model_matrix)
+        let v0 = vertex_shader(&Vertex::new(p0, n0, t0), uniforms);
+        let v1 = vertex_shader(&Vertex::new(p1, n1, t1), uniforms);
+        let v2 = vertex_shader(&Vertex::new(p2, n2, t2), uniforms);
+
+        // Rasteriza el triángulo usando tu función actual
+        all_fragments.extend(triangle(&v0, &v1, &v2));
+    });
+
+    // “Fragment stage”: pinta en el framebuffer usando el zbuffer
+    for fragment in all_fragments {
         let x = fragment.position.x as usize;
         let y = fragment.position.y as usize;
         if x < framebuffer.width && y < framebuffer.height {
-            let color = fragment.color.to_hex();
-            framebuffer.set_current_color(color);
+            framebuffer.set_current_color(fragment.color.to_hex());
             framebuffer.point(x, y, fragment.depth);
         }
     }
@@ -125,7 +127,6 @@ fn main() {
     let mut scale = 100.0f32;
 
     let obj = Obj::load("assets/models/Pelican.obj").expect("Failed to load obj");
-    let vertex_arrays = obj.get_vertex_array(); 
 
     while window.is_open() {
         if window.is_key_down(Key::Escape) {
@@ -140,7 +141,7 @@ fn main() {
         let uniforms = Uniforms { model_matrix };
 
         framebuffer.set_current_color(0xFFDDDD);
-        render(&mut framebuffer, &uniforms, &vertex_arrays);
+        render(&mut framebuffer, &uniforms, &obj);
 
         window
             .update_with_buffer(&framebuffer.buffer, framebuffer_width, framebuffer_height)

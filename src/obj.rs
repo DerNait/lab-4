@@ -40,6 +40,25 @@ impl Obj {
         Ok(Obj { meshes })
     }
 
+    /// Recorre todas las mallas y llama al callback con cada triángulo (índices).
+    pub fn for_each_face<F: FnMut(usize, usize, usize)>(&self, mut f: F) {
+        for mesh in &self.meshes {
+            for idx in mesh.indices.chunks(3) {
+                if let [i0, i1, i2] = *idx {
+                    f(i0 as usize, i1 as usize, i2 as usize);
+                }
+            }
+        }
+    }
+
+    /// Devuelve vistas a los buffers (posición, normal, uv) de la primera malla.
+    /// Si manejas múltiples mallas, puedes adaptar el render para recorrerlas todas.
+    pub fn mesh_buffers(&self) -> (&[Vec3], &[Vec3], &[Vec2]) {
+        let m = &self.meshes[0];
+        (&m.vertices, &m.normals, &m.texcoords)
+    }
+
+    /// (Opcional) Si quieres vértices expandidos como antes.
     pub fn get_vertex_array(&self) -> Vec<Vertex> {
         let mut vertices = Vec::new();
 
